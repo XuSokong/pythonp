@@ -64,7 +64,7 @@ def save_hex_to_txt(hex_string, filename):
         with open(txt_filename, 'w', encoding='utf-8') as txtfile:
             txtfile.write(hex_string.strip() + '\n')
         print(f"十六进制已保存到 {txt_filename}")
-        messagebox.showinfo("成功", f"十六进制已保存到 {txt_filename}")
+        # messagebox.showinfo("成功", f"十六进制已保存到 {txt_filename}")
     except PermissionError:
         print(f"权限错误：无法写入 {txt_filename}")
         messagebox.showerror("错误", f"权限错误：无法写入 {txt_filename}")
