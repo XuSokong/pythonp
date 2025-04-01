@@ -97,7 +97,7 @@ def plot_decimal_result(decimal_result, csvfilename):
     if len(times3) > 0:
         plt.plot(range(len(times3)), times3, label='times3')
     # 绘制 zeroleve 线
-    plt.axhline(y=zeroleve[0], color='g', linestyle='--', label='zero')
+    # plt.axhline(y=zeroleve[0], color='g', linestyle='--', label='zero')
     if one_third > 8:
         avg_voltage = (decimal_result[one_third - 8] + decimal_result[2 * one_third - 8] + decimal_result[
             3 * one_third - 8]) / 3
