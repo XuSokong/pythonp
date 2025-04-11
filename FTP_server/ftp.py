@@ -1,7 +1,7 @@
 import socket
 import psutil
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, filedialog
 from pyftpdlib.authorizers import DummyAuthorizer
 from pyftpdlib.handlers import FTPHandler
 from pyftpdlib.servers import FTPServer
@@ -55,7 +55,14 @@ def toggle_ftp_server():
 
             authorizer = DummyAuthorizer()
             authorizer.add_user(username, password, share_path, perm='elradfmwMT')
-            authorizer.add_anonymous(share_path)
+
+            if allow_anonymous_var.get():
+                if anonymous_permission_var.get() == 1:
+                    # 只读权限
+                    authorizer.add_anonymous(share_path, perm='elr')
+                else:
+                    # 可写权限
+                    authorizer.add_anonymous(share_path, perm='elradfmwMT')
 
             handler = FTPHandler
             handler.authorizer = authorizer
@@ -85,6 +92,13 @@ def toggle_ftp_server():
             # messagebox.showinfo("信息", "FTP 服务器已启动")
         except Exception as e:
             messagebox.showerror("错误", f"启动 FTP 服务器时出错: {e}")
+
+
+def select_folder():
+    folder_path = filedialog.askdirectory()
+    if folder_path:
+        share_path_entry.delete(0, tk.END)
+        share_path_entry.insert(0, folder_path)
 
 
 root = tk.Tk()
@@ -123,10 +137,30 @@ password_entry = tk.Entry(left_frame, show='*', font=("Arial", 10))
 password_entry.insert(0, '123456')
 password_entry.pack(pady=5)
 
-tk.Label(left_frame, text="共享地址:", font=("Arial", 10)).pack(pady=5)
-share_path_entry = tk.Entry(left_frame, font=("Arial", 10))
-share_path_entry.insert(0, 'C:/Users/Lenovo/Desktop/IRRad-20250410')
-share_path_entry.pack(pady=5)
+share_frame = tk.Frame(left_frame)
+share_frame.pack(pady=5)
+
+tk.Label(share_frame, text="共享地址:", font=("Arial", 10)).pack(side=tk.LEFT)
+share_path_entry = tk.Entry(share_frame, font=("Arial", 10), width=30)
+share_path_entry.insert(0, 'E:/')
+share_path_entry.pack(side=tk.LEFT)
+
+select_button = tk.Button(share_frame, text="...", command=select_folder)
+select_button.pack(side=tk.LEFT, padx=5)
+
+# 是否允许匿名访问
+allow_anonymous_var = tk.IntVar()
+allow_anonymous_checkbox = tk.Checkbutton(left_frame, text="允许匿名访问", variable=allow_anonymous_var)
+allow_anonymous_checkbox.pack(pady=5)
+
+# 匿名访问权限选择
+anonymous_permission_var = tk.IntVar()
+anonymous_permission_var.set(1)  # 默认只读
+tk.Label(left_frame, text="匿名访问权限:", font=("Arial", 10)).pack(pady=2)
+read_only_radio = tk.Radiobutton(left_frame, text="只读", variable=anonymous_permission_var, value=1)
+read_only_radio.pack(pady=2)
+writeable_radio = tk.Radiobutton(left_frame, text="可写", variable=anonymous_permission_var, value=2)
+writeable_radio.pack(pady=2)
 
 start_button = tk.Button(left_frame, text="启动 FTP 服务器", command=toggle_ftp_server, font=("Arial", 12))
 start_button.pack(pady=20)
