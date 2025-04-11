@@ -102,7 +102,7 @@ def select_folder():
 
 
 root = tk.Tk()
-root.title("网卡信息及 FTP 服务器")
+root.title("FTPserver")
 
 # 创建一个框架用于放置左边的配置信息
 left_frame = tk.Frame(root)
@@ -111,9 +111,8 @@ left_frame.pack(side=tk.LEFT, padx=10, pady=10)
 network_info = get_all_network_ips()
 
 info_text = tk.Text(left_frame, height=10, width=40, font=("Arial", 10))
-info_text.insert(tk.END, "当前主机的网卡及其对应的 IP 地址如下：\n")
 for interface, ip in network_info:
-    info_text.insert(tk.END, f"网卡名称: {interface}, IP 地址: {ip}\n")
+    info_text.insert(tk.END, f" {interface},  {ip}\n")
 info_text.pack(pady=10)
 info_text.config(state=tk.DISABLED)
 
@@ -142,7 +141,7 @@ share_frame.pack(pady=5)
 
 tk.Label(share_frame, text="共享地址:", font=("Arial", 10)).pack(side=tk.LEFT)
 share_path_entry = tk.Entry(share_frame, font=("Arial", 10), width=30)
-share_path_entry.insert(0, 'E:/')
+share_path_entry.insert(0, 'C:/Users/Lenovo/Desktop/IRRad-20250410')
 share_path_entry.pack(side=tk.LEFT)
 
 select_button = tk.Button(share_frame, text="...", command=select_folder)
