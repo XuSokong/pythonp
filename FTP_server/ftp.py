@@ -1,174 +1,260 @@
-import socket
 import psutil
-import tkinter as tk
-from tkinter import messagebox, filedialog
+import socket
+import os
 from pyftpdlib.authorizers import DummyAuthorizer
 from pyftpdlib.handlers import FTPHandler
 from pyftpdlib.servers import FTPServer
+import argparse
+import multiprocessing
+import tkinter as tk
+from tkinter import messagebox
+from tkinter import filedialog
+import sys
 import logging
 
-
-# 自定义日志处理程序，将日志输出到 tkinter 的文本框
-class TkinterLogger(logging.Handler):
-    def __init__(self, text_widget):
-        logging.Handler.__init__(self)
-        self.text_widget = text_widget
-
-    def emit(self, record):
-        msg = self.format(record)
-        self.text_widget.insert(tk.END, msg + '\n')
-        self.text_widget.see(tk.END)
+# 用于存储运行的进程
+running_processes = []
+# 标记 FTP 服务器状态
+ftp_running = False
+# 日志文件路径，使用绝对路径
+LOG_FILE = 'ftp_server.log'
 
 
-def get_all_network_ips():
-    network_info = []
-    for interface, addrs in psutil.net_if_addrs().items():
-        for addr in addrs:
-            if addr.family == socket.AF_INET:
-                network_info.append((interface, addr.address))
-    return network_info
+def get_valid_ips():
+    valid_ips = []
+    try:
+        net_if_addrs = psutil.net_if_addrs()
+        for interface, addrs in net_if_addrs.items():
+            for addr in addrs:
+                if addr.family == socket.AF_INET and not addr.address.startswith('169.254.'):
+                    valid_ips.append(f"{interface}: {addr.address}")
+    except Exception as e:
+        print(f"获取网络接口信息时出错: {e}")
+    return valid_ips
 
 
-server = None
-is_server_running = False
+def start_ftp_server(user, password, port, shared_dir, ip='', allow_anonymous=False, anonymous_perm='r',
+                     passive_ports=(60000, 65535)):
+    try:
+        os.chmod(shared_dir, 0o777)
+    except Exception as e:
+        logging.error(f"Failed to set directory permissions: {e}")
+        messagebox.showerror("错误", f"设置共享目录权限失败: {e}")
+        return
+
+    authorizer = DummyAuthorizer()
+    authorizer.add_user(user, password, shared_dir, perm="elradfmw")
+
+    if allow_anonymous:
+        authorizer.add_anonymous(shared_dir, perm=anonymous_perm)
+
+    handler = FTPHandler
+    handler.authorizer = authorizer
+    handler.passive_ports = range(passive_ports[0], passive_ports[1] + 1)
+
+    address = (ip, port)
+    server = FTPServer(address, handler)
+
+    # 配置日志记录到文件和命令行
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    file_handler = logging.FileHandler(LOG_FILE)
+    file_handler.setFormatter(formatter)
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setFormatter(formatter)
+
+    logger = logging.getLogger()
+    logger.addHandler(file_handler)
+    logger.addHandler(stream_handler)
+    logger.setLevel(logging.INFO)
+
+    logger.info(f"Starting FTP server on {ip}:{port} sharing directory {shared_dir}")
+    try:
+        server.serve_forever()
+    except Exception as e:
+        logger.error(f"FTP server error: {e}")
+        messagebox.showerror("错误", f"FTP 服务器出错: {e}")
 
 
-def toggle_ftp_server():
-    global server, is_server_running
-    if is_server_running:
-        try:
-            if server:
-                server.close_all()
-                server = None
-                start_button.config(text="启动 FTP 服务器")
-                is_server_running = False
-                # messagebox.showinfo("信息", "FTP 服务器已关闭")
-        except Exception as e:
-            messagebox.showerror("错误", f"关闭 FTP 服务器时出错: {e}")
+def start_all_ftp_servers(user, password, port, shared_dir, allow_anonymous, anonymous_perm, passive_ports, ui=True):
+    global running_processes, ftp_running
+    valid_ips = get_valid_ips()
+    if valid_ips:
+        for ip_info in valid_ips:
+            _, ip = ip_info.split(": ")
+            process = multiprocessing.Process(target=start_ftp_server, args=(
+                user, password, port, shared_dir, ip, allow_anonymous, anonymous_perm, passive_ports))
+            running_processes.append(process)
+            process.start()
+        ftp_running = True
+        if ui:
+            status_label.config(bg="green", text="FTP 服务器已启动")
+        # messagebox.showinfo("提示", "所有 FTP 服务器已启动。")
+
+
+def stop_all_ftp_servers(ui=True):
+    global running_processes, ftp_running
+    for process in running_processes:
+        if process.is_alive():
+            process.terminate()
+            process.join()
+    running_processes = []
+    ftp_running = False
+    if ui:
+        status_label.config(bg="red", text="FTP 服务器已停止")
+    # messagebox.showinfo("提示", "所有 FTP 服务器已停止。")
+
+
+def toggle_ftp_server(button):
+    global ftp_running
+    if ftp_running:
+        stop_all_ftp_servers(True)
+        button.config(text="启动 FTP 服务器")
     else:
+        user = user_entry.get()
+        password = password_entry.get()
         try:
-            server_address = address_entry.get()
             port = int(port_entry.get())
-            username = user_entry.get()
-            password = password_entry.get()
-            share_path = share_path_entry.get()
-
-            authorizer = DummyAuthorizer()
-            authorizer.add_user(username, password, share_path, perm='elradfmwMT')
-
-            if allow_anonymous_var.get():
-                if anonymous_permission_var.get() == 1:
-                    # 只读权限
-                    authorizer.add_anonymous(share_path, perm='elr')
-                else:
-                    # 可写权限
-                    authorizer.add_anonymous(share_path, perm='elradfmwMT')
-
-            handler = FTPHandler
-            handler.authorizer = authorizer
-
-            address = (server_address, port)
-            server = FTPServer(address, handler)
-
-            server.max_cons = 256
-            server.max_cons_per_ip = 5
-
-            # 配置日志记录
-            logger = logging.getLogger()
-            logger.setLevel(logging.INFO)
-            formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-            tkinter_logger = TkinterLogger(log_text)
-            tkinter_logger.setFormatter(formatter)
-            logger.addHandler(tkinter_logger)
-
-            # 这里使用线程来启动服务器，避免阻塞主线程
-            import threading
-            server_thread = threading.Thread(target=server.serve_forever)
-            server_thread.daemon = True
-            server_thread.start()
-
-            start_button.config(text="关闭 FTP 服务器")
-            is_server_running = True
-            # messagebox.showinfo("信息", "FTP 服务器已启动")
-        except Exception as e:
-            messagebox.showerror("错误", f"启动 FTP 服务器时出错: {e}")
+        except ValueError:
+            messagebox.showerror("错误", "端口号必须是整数。")
+            return
+        shared_dir = shared_dir_entry.get()
+        allow_anonymous = anonymous_var.get()
+        # 转换匿名用户权限选项
+        if anonymous_perm_var.get() == "只读":
+            anonymous_perm = 'r'
+        else:
+            anonymous_perm = 'elradfmw'
+        passive_ports = (60000, 65535)
+        start_all_ftp_servers(user, password, port, shared_dir, allow_anonymous, anonymous_perm, passive_ports, True)
+        button.config(text="停止 FTP 服务器")
 
 
-def select_folder():
-    folder_path = filedialog.askdirectory()
-    if folder_path:
-        share_path_entry.delete(0, tk.END)
-        share_path_entry.insert(0, folder_path)
+def select_shared_directory():
+    shared_dir = filedialog.askdirectory()
+    if shared_dir:
+        shared_dir_entry.delete(0, tk.END)
+        shared_dir_entry.insert(0, shared_dir)
 
 
-root = tk.Tk()
-root.title("FTPserver")
+def update_log():
+    try:
+        with open(LOG_FILE, 'r', encoding='utf-8') as f:
+            log_content = f.read()
+            log_text.delete(1.0, tk.END)
+            log_text.insert(tk.END, log_content)
+            # 将光标移动到文本末尾，实现自动翻到最新
+            log_text.see(tk.END)
+    except FileNotFoundError:
+        pass
+    root.after(1000, update_log)
 
-# 创建一个框架用于放置左边的配置信息
-left_frame = tk.Frame(root)
-left_frame.pack(side=tk.LEFT, padx=10, pady=10)
 
-network_info = get_all_network_ips()
+if __name__ == "__main__":
+    multiprocessing.freeze_support()
+    parser = argparse.ArgumentParser(description='Start an FTP server with custom settings.')
+    parser.add_argument('-u', default='xusokong', help='Username for FTP access')
+    parser.add_argument('-pw', default='12345678', help='Password for FTP access')
+    parser.add_argument('-p', type=int, default=2121, help='Port number for the FTP server')
+    parser.add_argument('-dir', default='.', help='Directory to be shared via FTP')
+    parser.add_argument('-any', action='store_true', help='Allow anonymous access')
+    parser.add_argument('-anyrw', default='r', choices=['r', 'elradfmw'],
+                        help='Permissions for anonymous users, "r" for read-only, "elradfmw" for read-write')
+    parser.add_argument('-pp', nargs=2, type=int, default=[60000, 65535],
+                        help='Passive port range for the FTP server, e.g., 60000 65535')
+    parser.add_argument('-cmd', action='store_true', help='Run in command-line mode without UI')
 
-info_text = tk.Text(left_frame, height=10, width=40, font=("Arial", 10))
-for interface, ip in network_info:
-    info_text.insert(tk.END, f" {interface},  {ip}\n")
-info_text.pack(pady=10)
-info_text.config(state=tk.DISABLED)
+    args = parser.parse_args()
 
-tk.Label(left_frame, text="服务器地址:", font=("Arial", 10)).pack(pady=5)
-address_entry = tk.Entry(left_frame, font=("Arial", 10))
-address_entry.insert(0, '')
-address_entry.pack(pady=5)
+    if args.cmd:
+        # 命令行模式，不启动 UI，直接启动 FTP 服务器
+        start_all_ftp_servers(args.u, args.pw, args.p, args.dir, args.any, args.anyrw, tuple(args.pp), False)
+        try:
+            while True:
+                pass
+        except KeyboardInterrupt:
+            stop_all_ftp_servers(False)
+    else:
+        # 默认模式，启动 UI
+        # 创建主窗口
+        root = tk.Tk()
+        root.title("FTPserver")
 
-tk.Label(left_frame, text="端口:", font=("Arial", 10)).pack(pady=5)
-port_entry = tk.Entry(left_frame, font=("Arial", 10))
-port_entry.insert(0, '21')
-port_entry.pack(pady=5)
+        # 状态栏
+        status_label = tk.Label(root, text="FTP 服务器未启动", bg="red", anchor=tk.W)
+        status_label.pack(fill=tk.X)
 
-tk.Label(left_frame, text="用户:", font=("Arial", 10)).pack(pady=5)
-user_entry = tk.Entry(left_frame, font=("Arial", 10))
-user_entry.insert(0, 'xusokong')
-user_entry.pack(pady=5)
+        # 左侧配置面板
+        left_frame = tk.Frame(root)
+        left_frame.pack(side=tk.LEFT, padx=10, pady=10)
 
-tk.Label(left_frame, text="密码:", font=("Arial", 10)).pack(pady=5)
-password_entry = tk.Entry(left_frame, show='*', font=("Arial", 10))
-password_entry.insert(0, '123456')
-password_entry.pack(pady=5)
+        # 显示网卡和 IP 地址
+        ip_info = "\n".join(get_valid_ips())
+        ip_label = tk.Label(left_frame, text="IP地址:")
+        ip_label.pack()
+        ip_text = tk.Text(left_frame, height=5, width=30)
+        ip_text.insert(tk.END, ip_info)
+        ip_text.pack()
 
-share_frame = tk.Frame(left_frame)
-share_frame.pack(pady=5)
+        # FTP 用户输入框
+        user_label = tk.Label(left_frame, text="FTP 用户:")
+        user_label.pack()
+        user_entry = tk.Entry(left_frame)
+        user_entry.insert(0, args.u)
+        user_entry.pack()
 
-tk.Label(share_frame, text="共享地址:", font=("Arial", 10)).pack(side=tk.LEFT)
-share_path_entry = tk.Entry(share_frame, font=("Arial", 10), width=30)
-share_path_entry.insert(0, 'C:/Users/Lenovo/Desktop/IRRad-20250410')
-share_path_entry.pack(side=tk.LEFT)
+        # FTP 密码输入框
+        password_label = tk.Label(left_frame, text="FTP 密码:")
+        password_label.pack()
+        password_entry = tk.Entry(left_frame, show="*")
+        password_entry.insert(0, args.pw)
+        password_entry.pack()
 
-select_button = tk.Button(share_frame, text="...", command=select_folder)
-select_button.pack(side=tk.LEFT, padx=5)
+        # FTP 端口输入框
+        port_label = tk.Label(left_frame, text="FTP 端口:")
+        port_label.pack()
+        port_entry = tk.Entry(left_frame)
+        port_entry.insert(0, str(args.p))
+        port_entry.pack()
 
-# 是否允许匿名访问
-allow_anonymous_var = tk.IntVar()
-allow_anonymous_checkbox = tk.Checkbutton(left_frame, text="允许匿名访问", variable=allow_anonymous_var)
-allow_anonymous_checkbox.pack(pady=5)
+        # 共享地址输入框和选择按钮
+        shared_dir_label = tk.Label(left_frame, text="共享地址:")
+        shared_dir_label.pack()
+        shared_dir_entry = tk.Entry(left_frame)
+        shared_dir_entry.insert(0, args.dir)
+        shared_dir_entry.pack()
+        select_button = tk.Button(left_frame, text="选择共享文件夹", command=select_shared_directory)
+        select_button.pack()
 
-# 匿名访问权限选择
-anonymous_permission_var = tk.IntVar()
-anonymous_permission_var.set(1)  # 默认只读
-tk.Label(left_frame, text="匿名访问权限:", font=("Arial", 10)).pack(pady=2)
-read_only_radio = tk.Radiobutton(left_frame, text="只读", variable=anonymous_permission_var, value=1)
-read_only_radio.pack(pady=2)
-writeable_radio = tk.Radiobutton(left_frame, text="可写", variable=anonymous_permission_var, value=2)
-writeable_radio.pack(pady=2)
+        # 是否允许匿名用户复选框
+        anonymous_var = tk.BooleanVar()
+        anonymous_var.set(args.any)
+        anonymous_checkbox = tk.Checkbutton(left_frame, text="允许匿名用户", variable=anonymous_var)
+        anonymous_checkbox.pack()
 
-start_button = tk.Button(left_frame, text="启动 FTP 服务器", command=toggle_ftp_server, font=("Arial", 12))
-start_button.pack(pady=20)
+        # 匿名用户权限选择框
+        anonymous_perm_var = tk.StringVar()
+        anonymous_perm_var.set("只读" if args.anyrw == 'r' else "读写")
+        anonymous_perm_label = tk.Label(left_frame, text="匿名用户权限:")
+        anonymous_perm_label.pack()
+        anonymous_perm_menu = tk.OptionMenu(left_frame, anonymous_perm_var, "只读", "读写")
+        anonymous_perm_menu.pack()
 
-# 创建一个框架用于放置右边的日志文本框
-right_frame = tk.Frame(root)
-right_frame.pack(side=tk.RIGHT, padx=10, pady=10)
+        # 创建切换按钮
+        toggle_button = tk.Button(left_frame, text="启动 FTP 服务器",
+                                  command=lambda: toggle_ftp_server(toggle_button))
+        toggle_button.pack(pady=20)
 
-log_text = tk.Text(right_frame, height=30, width=60, font=("Arial", 10))
-log_text.pack()
+        # 右侧日志面板
+        right_frame = tk.Frame(root)
+        right_frame.pack(side=tk.RIGHT, padx=10, pady=10, fill=tk.BOTH, expand=True)
 
-root.mainloop()
+        log_label = tk.Label(right_frame, text="FTP 日志:")
+        log_label.pack()
+        log_text = tk.Text(right_frame, height=20, width=40)
+        log_text.pack(fill=tk.BOTH, expand=True)
+
+        # 定期更新日志
+        root.after(1000, update_log)
+
+        # 运行主循环
+        root.mainloop()
