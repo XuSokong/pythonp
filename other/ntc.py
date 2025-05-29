@@ -7,7 +7,8 @@ from scipy.interpolate import interp1d
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 # 设置中文字体支持
-plt.rcParams["font.family"] = ["SimHei", "WenQuanYi Micro Hei", "Heiti TC"]
+# 设置中文字体支持（移除不存在的字体）
+plt.rcParams["font.family"] = ["SimHei", "Microsoft YaHei", "SimSun"]
 
 
 class TemperatureResistanceApp:
@@ -51,10 +52,12 @@ class TemperatureResistanceApp:
         calculate_button = ttk.Button(control_frame, text="计算温度", command=self.calculate_temperature)
         calculate_button.pack(fill=tk.X, pady=10)
 
-        # 结果显示
+        # 结果显示 - 使用文本框代替标签
         ttk.Label(control_frame, text="计算结果:").pack(anchor=tk.W, pady=5)
-        self.result_var = tk.StringVar(value="等待计算...")
-        ttk.Label(control_frame, textvariable=self.result_var, font=("Arial", 12, "bold")).pack(pady=5)
+        self.result_text = tk.Text(control_frame, height=6, width=30, wrap=tk.WORD)
+        self.result_text.pack(fill=tk.X, pady=5)
+        self.result_text.insert(tk.END, "等待计算...")
+        self.result_text.config(state=tk.DISABLED)  # 设置为只读
 
         # 右侧图表区域
         self.figure, self.ax = plt.subplots(figsize=(5, 4), dpi=100)
@@ -96,7 +99,7 @@ class TemperatureResistanceApp:
             self.update_plot()
 
             self.status_var.set(f"数据加载成功，点数: {len(df)}")
-            self.result_var.set("数据已加载，请输入电压值并计算")
+            self.update_result_text("数据已加载，请输入电压值并计算")
 
         except Exception as e:
             messagebox.showerror("错误", f"加载数据时出错: {str(e)}")
@@ -119,6 +122,13 @@ class TemperatureResistanceApp:
         self.ax.legend()
         self.canvas.draw()
 
+    def update_result_text(self, text):
+        """更新结果文本框的内容"""
+        self.result_text.config(state=tk.NORMAL)
+        self.result_text.delete(1.0, tk.END)
+        self.result_text.insert(tk.END, text)
+        self.result_text.config(state=tk.DISABLED)
+
     def calculate_temperature(self):
         """根据电压值计算温度"""
         if self.interp_function is None:
@@ -133,7 +143,7 @@ class TemperatureResistanceApp:
             # 在图表上标记计算点
             self.update_plot()
             self.ax.plot(resistance, temperature, 'g*', markersize=10, label='计算点')
-            self.ax.annotate(f'({resistance:.2f} Ω, {temperature:.2f}°C)',
+            self.ax.annotate(f'({resistance:.6f} Ω, {temperature:.6f}°C)',
                              xy=(resistance, temperature),
                              xytext=(10, 10),
                              textcoords='offset points',
@@ -141,7 +151,12 @@ class TemperatureResistanceApp:
             self.ax.legend()
             self.canvas.draw()
 
-            self.result_var.set(f"电阻值: {resistance:.2f} Ω\n温度: {temperature:.2f} °C")
+            # 更新结果文本框
+            result_text = f"电压值: {voltage:.6f} V\n"
+            result_text += f"电阻值: {resistance:.6f} Ω\n"
+            result_text += f"温度: {temperature:.6f} °C"
+            self.update_result_text(result_text)
+
             self.status_var.set("计算完成")
 
         except Exception as e:
@@ -156,4 +171,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()    
+    main()
